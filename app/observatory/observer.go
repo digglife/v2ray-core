@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"sync"
 	"time"
 
@@ -69,23 +68,48 @@ func (o *Observer) background() {
 		}
 
 		outbounds := hs.Select(o.config.SubjectSelector)
-		sort.Strings(outbounds)
 
 		o.updateStatus(outbounds)
 
-		for _, v := range outbounds {
-			result := o.probe(v)
-			o.updateStatusForResult(v, &result)
-			if o.finished.Done() {
-				return
-			}
-			sleepTime := time.Second * 10
-			if o.config.ProbeInterval != 0 {
-				sleepTime = time.Duration(o.config.ProbeInterval)
-			}
-			time.Sleep(sleepTime)
+		o.RunProbeConcurrent(outbounds)
+
+		sleepTime := time.Second * 10
+		if o.config.ProbeInterval != 0 {
+			sleepTime = time.Duration(o.config.ProbeInterval)
 		}
+		time.Sleep(sleepTime)
 	}
+}
+
+func (o *Observer) RunProbeConcurrent(outbounds []string) {
+	var max uint32 = 1
+	if o.config.ProbeMaxConcurrency != 0 {
+		max = o.config.ProbeMaxConcurrency
+	}
+	ch := make(chan string, max)
+	var wg sync.WaitGroup
+	var i uint32
+
+	for i = 1; i <= max; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for c := range ch {
+				result := o.probe(c)
+				o.updateStatusForResult(c, &result)
+			}
+		}()
+	}
+
+	for _, v := range outbounds {
+		if o.finished.Done() {
+			return
+		}
+		ch <- v
+	}
+
+	close(ch)
+	wg.Wait()
 }
 
 func (o *Observer) updateStatus(outbounds []string) {
