@@ -132,7 +132,7 @@ func (g *Instance) Handle(msg log.Message) {
 
 	switch msg := msg.(type) {
 	case *log.AccessMessage:
-		if g.accessLogger != nil {
+		if g.accessLogger != nil && log.Severity_Info <= g.config.Error.Level {
 			g.accessLogger.Handle(msg)
 		}
 	case *log.GeneralMessage:
